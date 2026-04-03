@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Trading Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+<style>
+body {
+  margin: 0;
+  display: flex;
+  font-family: 'Segoe UI', sans-serif;
+  background: #f8f9fa;
+  color: #333;
+}
+
+/* Sidebar */
+#sidebar {
+  width: 200px;
+  background: #fff;
+  box-shadow: 2px 0 10px rgba(0,0,0,0.05);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+#sidebar button {
+  margin-bottom: 10px;
+  padding: 12px;
+  border: none;
+  border-radius: 6px;
+  background: #007bff;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+#sidebar button:hover {
+  background: #0069d9;
+}
+
+#sidebar button.active {
+  background: #0056b3;
+}
+
+/* Main */
+#main {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+/* Charts */
+.chart-container {
+  width: 100%;
+  max-width: 1000px;
+  height: 400px;
+  margin: 40px auto;
+}
+
+/* Table */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+
+th, td {
+  padding: 10px;
+  text-align: right;
+}
+
+th {
+  background: #f1f3f5;
+}
+
+tr:nth-child(even) {
+  background: #fafafa;
+}
+</style>
+</head>
+
+<body>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <button class="tab active" data-sheet="AFL">AFL</button>
+  <button class="tab" data-sheet="Tennis">Tennis</button>
+  <button class="tab" data-sheet="Cricket">Cricket</button>
+  <button class="tab" data-sheet="Basketball">Basketball</button>
+  <button class="tab" data-sheet="NFL">NFL</button>
+</div>
+
+<!-- Main -->
+<div id="main">
+  <h1 id="title">AFL Favourite +20% Performance</h1>
+
+  <div class="chart-container">
+    <canvas id="cumulativeChart"></canvas>
+  </div>
+
+  <div class="chart-container">
+    <canvas id="profitChart"></canvas>
+  </div>
+
+  <div id="tableContainer"></div>
+</div>
+
+<script>
+let workbook;
+let cumulativeChart, profitChart;
+
+// Load Excel once
+fetch('Betfair-Volatility-Trading.xlsx')
+  .then(res => res.arrayBuffer())
+  .then(buffer => {
+    workbook = XLSX.read(buffer, { type: 'array' });
+    loadSheet('AFL');
+  });
+
+// Tab switching
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadSheet(btn.dataset.sheet);
+  });
+});
+
+function loadSheet(sheetName) {
+  document.getElementById('title').innerText =
+    `${sheetName} Favourite +20% Performance`;
+
+  const sheet = workbook.Sheets[sheetName];
+  if (!sheet) {
+    document.getElementById('tableContainer').innerHTML =
+      `<p style="color:red">Sheet "${sheetName}" not found</p>`;
+    return;
+  }
+
+  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 3 });
+  const headers = raw[0];
+
+  let data = raw.slice(1).map(r => {
+    let obj = {};
+    headers.forEach((h,i) => obj[h] = r[i]);
+    return obj;
+  });
+
+  data = data.filter(d => d['Outcome'] === 'WON' || d['Outcome'] === 'LOST');
+
+  renderTable(data, headers);
+  renderCharts(data);
+}
+
+function renderTable(data, headers) {
+  const filteredHeaders = headers.filter(h =>
+    !['Implied','Adjusted','Matched','Margin','Profit (u)'].includes(h)
+  );
+
+  let html = '<table><thead><tr>';
+  filteredHeaders.forEach(h => html += `<th>${h}</th>`);
+  html += '</tr></thead><tbody>';
+
+  data.forEach(row => {
+    html += '<tr>';
+
+    filteredHeaders.forEach(h => {
+      let val = row[h];
+
+      // Handle empty values
+      if (val === undefined || val === null || val === '') {
+        val = '';
+      }
+
+      // ✅ ID (0dp)
+      else if (h === 'ID' && !isNaN(val)) {
+        val = Number(val).toFixed(0);
+      }
+
+      // ✅ Profit ($ + color)
+      else if (h === 'Profit' && !isNaN(val)) {
+        const num = Number(val);
+        const color = num >= 0 ? 'green' : 'red';
+        const sign = num > 0 ? '+' : '';
+        val = `<span style="color:${color}">${sign}$${num.toFixed(2)}</span>`;
+      }
+
+      // ✅ Other numbers (2dp)
+      else if (!isNaN(val)) {
+        val = Number(val).toFixed(2);
+      }
+
+      html += `<td>${val}</td>`;
+    });
+
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  document.getElementById('tableContainer').innerHTML = html;
+}
+
+function renderCharts(data) {
+  const labels = data.map(d => d['ID']);
+  const profit = data.map(d => Number(d['Profit']) || 0);
+
+  // cumulative
+  let cumulative = [];
+  profit.reduce((a, v) => {
+    a += v;
+    cumulative.push(a);
+    return a;
+  }, 0);
+
+  const colors = profit.map(v => v >= 0 ? 'green' : 'red');
+
+  // destroy old charts
+  if (cumulativeChart) cumulativeChart.destroy();
+  if (profitChart) profitChart.destroy();
+
+  // cumulative chart
+  cumulativeChart = new Chart(
+    document.getElementById('cumulativeChart'),
+    {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Cumulative Profit',
+          data: cumulative,
+          borderColor: '#007bff',
+          backgroundColor: 'rgba(0,123,255,0.1)',
+          fill: true,
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: ctx => `$${ctx.raw.toFixed(2)}`
+            }
+          }
+        },
+        scales: {
+          y: {
+            ticks: {
+              callback: v => `$${v.toFixed(2)}`
+            }
+          }
+        }
+      }
+    }
+  );
+
+  // bar chart
+  profitChart = new Chart(
+    document.getElementById('profitChart'),
+    {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Profit',
+          data: profit,
+          backgroundColor: colors
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: ctx => `$${ctx.raw.toFixed(2)}`
+            }
+          }
+        },
+        scales: {
+          y: {
+            ticks: {
+              callback: v => `$${v.toFixed(2)}`
+            }
+          }
+        }
+      }
+    }
+  );
+}
+</script>
+
+</body>
+</html>
