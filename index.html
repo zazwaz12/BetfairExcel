@@ -101,6 +101,7 @@ tr:nth-child(even) {
   <button class="tab" data-sheet="Cricket">Cricket</button>
   <button class="tab" data-sheet="Basketball">Basketball</button>
   <button class="tab" data-sheet="NFL">NFL</button>
+  <button class="tab" data-sheet="Options">Options</button>
 </div>
 
 <!-- Main -->
@@ -123,7 +124,7 @@ let workbook;
 let cumulativeChart, profitChart;
 
 // Load Excel once
-fetch('Betfair-Volatility-Trading.xlsx')
+fetch('Betfair-Volatility-Trading.xlsx', { cache: 'reload' })
   .then(res => res.arrayBuffer())
   .then(buffer => {
     workbook = XLSX.read(buffer, { type: 'array' });
@@ -141,7 +142,9 @@ document.querySelectorAll('.tab').forEach(btn => {
 
 function loadSheet(sheetName) {
   document.getElementById('title').innerText =
-    `${sheetName} Favourite +20% Performance`;
+    sheetName === "Options"
+    ? "VOO - Iron Condor Strategy"
+    : `${sheetName} Favourite +20% Performance`;
 
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) {
@@ -159,7 +162,7 @@ function loadSheet(sheetName) {
     return obj;
   });
 
-  data = data.filter(d => d['Outcome'] === 'WON' || d['Outcome'] === 'LOST');
+  /*data = data.filter(d => d['Outcome'] === 'WON' || d['Outcome'] === 'LOST');*/
 
   renderTable(data, headers);
   renderCharts(data);
